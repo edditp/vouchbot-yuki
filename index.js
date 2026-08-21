@@ -28,8 +28,8 @@ const commands = [
 
     new SlashCommandBuilder()
         .setName('exchange')
-        .setDescription('Berechnet den Paysafe-Exchange Kurs (10%) (Nur für Admins)')
-        .setDefaultMemberPermissions(0) // Ebenfalls nur für Administratoren
+        .setDescription('Berechnet den Paysafe-Exchange Kurs (10%)') // Beschreibung angepasst
+        // .setDefaultMemberPermissions(0) -> HIER ENTFERNT, damit jeder den Befehl nutzen kann!
         .addNumberOption(option => 
             option.setName('betrag')
                 .setDescription('Der Betrag in Euro (z.B. 180)')
@@ -124,8 +124,8 @@ client.on('interactionCreate', async interaction => {
             )
             .setTimestamp();
 
-        // ephemeral: true hinzugefügt, damit auch dieser Befehl nur für dich sichtbar ist
-        await interaction.reply({ embeds: [embed], ephemeral: true });
+        // ephemeral: true entfernt -> Antwort ist jetzt öffentlich im Chat sichtbar!
+        await interaction.reply({ embeds: [embed] });
     }
 });
 
