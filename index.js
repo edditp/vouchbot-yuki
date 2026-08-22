@@ -13,10 +13,9 @@ const client = new Client({
 const TOKEN = process.env.TOKEN;
 const VOUCH_CHANNEL_ID = process.env.VOUCH_CHANNEL_ID;
 
-// === TRAGE HIER DEINE KANAL-IDS DIREKT EIN ===
+// Direkt eingetragene Statistik-Kanal-ID
 const STATS_MEMBERS_ID = '1540564623286214717'; 
-const STATS_BOTS_ID = ''; // Optional (leer lassen, wenn du keinen Bot-Kanal hast)
-// ============================================
+const STATS_BOTS_ID = ''; // Optional (leer lassen)
 
 let vouchCount = 0;
 let lastStickyMessage = null;
@@ -71,13 +70,19 @@ client.once('ready', async () => {
 // Funktion für Server-Statistiken
 async function updateServerStats(guild) {
     try {
-        if (STATS_MEMBERS_ID && STATS_MEMBERS_ID !== '1540564623286214717') {
+        if (STATS_MEMBERS_ID) {
             const memberChannel = guild.channels.cache.get(STATS_MEMBERS_ID);
             if (memberChannel && memberChannel.type === ChannelType.GuildVoice) {
-                await memberChannel.setName(`📊 Mitglieder: ${guild.memberCount}`);
+                const memberCount = guild.memberCount;
+                await memberChannel.setName(`📊 Mitglieder: ${memberCount}`);
+                console.log(`Mitglieder-Statistik aktualisiert: ${memberCount}`);
+            } else {
+                console.log('Mitglieder-Kanal nicht gefunden oder kein Sprachkanal (ChannelType.GuildVoice)!');
             }
         }
+        
         if (STATS_BOTS_ID) {
+            await guild.members.fetch();
             const botCount = guild.members.cache.filter(member => member.user.bot).size;
             const botChannel = guild.channels.cache.get(STATS_BOTS_ID);
             if (botChannel && botChannel.type === ChannelType.GuildVoice) {
