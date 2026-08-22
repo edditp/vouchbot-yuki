@@ -1,35 +1,38 @@
-const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, ChannelType } = require('discord.js');
 
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildMembers // Wichtig für Live-Statistiken
     ]
 });
 
-// Nutzt sicher die Umgebungsvariablen von Railway
+// Nutzt sicher die Umgebungsvariablen für Token & Vouch-Channel von Railway
 const TOKEN = process.env.TOKEN;
 const VOUCH_CHANNEL_ID = process.env.VOUCH_CHANNEL_ID;
+
+// === TRAGE HIER DEINE KANAL-IDS DIREKT EIN ===
+const STATS_MEMBERS_ID = '1540564623286214717'; 
+const STATS_BOTS_ID = ''; // Optional (leer lassen, wenn du keinen Bot-Kanal hast)
+// ============================================
 
 let vouchCount = 0;
 let lastStickyMessage = null;
 
-// Befehle definieren
 const commands = [
     new SlashCommandBuilder()
         .setName('stripe')
         .setDescription('Berechnet Stripe-Gebühren (Nur für Admins)')
-        .setDefaultMemberPermissions(0) // Nur für Administratoren
+        .setDefaultMemberPermissions(0)
         .addNumberOption(option => 
             option.setName('betrag')
                 .setDescription('Der Betrag in Euro (z.B. 180)')
                 .setRequired(true)),
-
     new SlashCommandBuilder()
         .setName('exchange')
-        .setDescription('Berechnet den Paysafe-Exchange Kurs (10%)') // Beschreibung angepasst
-        // .setDefaultMemberPermissions(0) -> HIER ENTFERNT, damit jeder den Befehl nutzen kann!
+        .setDescription('Berechnet den Paysafe-Exchange Kurs (10%)')
         .addNumberOption(option => 
             option.setName('betrag')
                 .setDescription('Der Betrag in Euro (z.B. 180)')
@@ -39,37 +42,59 @@ const commands = [
 client.once('ready', async () => {
     console.log(`Eingeloggt als ${client.user.tag}!`);
 
-    // Slash-Commands global registrieren
+    // Slash-Commands registrieren
     const rest = new REST({ version: '10' }).setToken(TOKEN);
     try {
-        await rest.put(
-            Routes.applicationCommands(client.user.id),
-            { body: commands },
-        );
+        await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
         console.log('Slash-Commands erfolgreich registriert!');
     } catch (error) {
-        console.error('Fehler beim Registrieren der Slash-Commands:', error);
+        console.error('Fehler bei Slash-Commands:', error);
     }
     
+    // Vouches initialisieren
     const channel = await client.channels.fetch(VOUCH_CHANNEL_ID).catch(() => null);
     if (channel && channel.isTextBased()) {
-        try {
-            const messages = await channel.messages.fetch({ limit: 100 });
-            vouchCount = messages.filter(msg => !msg.author.bot).size;
-            console.log(`Initialisierte Vouches: ${vouchCount}`);
-            await sendStickyMessage(channel);
-        } catch (error) {
-            console.error('Fehler beim Abrufen der Nachrichten:', error);
-        }
+        const messages = await channel.messages.fetch({ limit: 100 });
+        vouchCount = messages.filter(msg => !msg.author.bot).size;
+        await sendStickyMessage(channel);
     }
+
+    // Statistiken beim Start einmal aktualisieren
+    client.guilds.cache.forEach(guild => updateServerStats(guild));
+    
+    // Intervall: Alle 15 Minuten Statistiken aktualisieren
+    setInterval(() => {
+        client.guilds.cache.forEach(guild => updateServerStats(guild));
+    }, 15 * 60 * 1000);
 });
 
-async function sendStickyMessage(channel) {
-    if (lastStickyMessage) {
-        try {
-            await lastStickyMessage.delete();
-        } catch (err) {}
+// Funktion für Server-Statistiken
+async function updateServerStats(guild) {
+    try {
+        if (STATS_MEMBERS_ID && STATS_MEMBERS_ID !== '1540564623286214717') {
+            const memberChannel = guild.channels.cache.get(STATS_MEMBERS_ID);
+            if (memberChannel && memberChannel.type === ChannelType.GuildVoice) {
+                await memberChannel.setName(`📊 Mitglieder: ${guild.memberCount}`);
+            }
+        }
+        if (STATS_BOTS_ID) {
+            const botCount = guild.members.cache.filter(member => member.user.bot).size;
+            const botChannel = guild.channels.cache.get(STATS_BOTS_ID);
+            if (botChannel && botChannel.type === ChannelType.GuildVoice) {
+                await botChannel.setName(`🤖 Bots: ${botCount}`);
+            }
+        }
+    } catch (error) {
+        console.error('Fehler beim Aktualisieren der Server-Stats:', error);
     }
+}
+
+// Events für Live-Update bei Beitritt/Verlassen
+client.on('guildMemberAdd', (member) => updateServerStats(member.guild));
+client.on('guildMemberRemove', (member) => updateServerStats(member.guild));
+
+async function sendStickyMessage(channel) {
+    if (lastStickyMessage) try { await lastStickyMessage.delete(); } catch (err) {}
 
     const embed = new EmbedBuilder()
         .setColor(0x2b2d31)
@@ -83,61 +108,41 @@ async function sendStickyMessage(channel) {
         .setFooter({ text: 'TP CHECKOUT • Offizielles Bewertungssystem', iconURL: client.user.displayAvatarURL() })
         .setTimestamp();
 
-    try {
-        lastStickyMessage = await channel.send({ embeds: [embed] });
-    } catch (error) {
-        console.error('Fehler beim Senden der Sticky Message:', error);
-    }
+    lastStickyMessage = await channel.send({ embeds: [embed] });
 }
 
-// Event für Slash-Commands
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
-
     const { commandName } = interaction;
     const amount = interaction.options.getNumber('betrag');
 
     if (commandName === 'stripe') {
         const stripeStd = (amount - ((amount * 0.015) + 0.25)).toFixed(2);
         const stripeBus = (amount - ((amount * 0.028) + 0.25)).toFixed(2);
-
         const embed = new EmbedBuilder()
             .setColor('#635BFF')
             .setTitle(`Stripe Gebühren für ${amount.toFixed(2)} €`)
             .addFields(
                 { name: '🇪🇺 EWR Standard (1,5% + 0,25 €)', value: `Du erhältst: **${stripeStd} €**`, inline: false },
                 { name: '💼 EWR Firmenkarte (2,8% + 0,25 €)', value: `Du erhältst: **${stripeBus} €**`, inline: false }
-            )
-            .setTimestamp();
-
+            );
         await interaction.reply({ embeds: [embed], ephemeral: true });
     }
 
     if (commandName === 'exchange') {
         const pscAusgabe = (amount * 0.90).toFixed(2);
-
         const embed = new EmbedBuilder()
             .setColor('#00FF00')
             .setTitle(`Paysafe Exchange für ${amount.toFixed(2)} €`)
-            .addFields(
-                { name: '🔄 Fester Kurs (10% Abzug)', value: `Der Kunde erhält: **${pscAusgabe} €**\n*(Beispiel: ${amount} € ➔ ${pscAusgabe} €)*`, inline: false }
-            )
-            .setTimestamp();
-
-        // ephemeral: true entfernt -> Antwort ist jetzt öffentlich im Chat sichtbar!
+            .addFields({ name: '🔄 Fester Kurs (10% Abzug)', value: `Der Kunde erhält: **${pscAusgabe} €**`, inline: false });
         await interaction.reply({ embeds: [embed] });
     }
 });
 
-// Event für Sticky Messages (Vouches)
 client.on('messageCreate', async (message) => {
     if (message.channel.id !== VOUCH_CHANNEL_ID || message.author.bot) return;
-
     vouchCount++;
-
-    setTimeout(async () => {
-        await sendStickyMessage(message.channel);
-    }, 1000);
+    setTimeout(async () => await sendStickyMessage(message.channel), 1000);
 });
 
 client.login(TOKEN);
