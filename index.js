@@ -52,7 +52,6 @@ function saveVerifiedUser(userId) {
 const TOKEN = process.env.TOKEN;
 const VOUCH_CHANNEL_ID = process.env.VOUCH_CHANNEL_ID;
 
-// --- ZWEI LOG-KANÄLE (ÜBER RAILWAY VARIABLES STEUERBAR) ---
 const LOG_CHANNEL_1 = process.env.LOG_CHANNEL_ID || '';
 const LOG_CHANNEL_2 = process.env.LOG_CHANNEL_ID_2 || '';
 
@@ -281,7 +280,6 @@ app.post('/complete', async (req, res) => {
             await member.roles.add(role);
             saveVerifiedUser(userId);
 
-            // --- LOGS AN BEIDE KANÄLE SENDEN ---
             const logChannels = [LOG_CHANNEL_1, LOG_CHANNEL_2];
             for (const channelId of logChannels) {
                 if (channelId) {
@@ -501,21 +499,27 @@ client.on('interactionCreate', async interaction => {
             return interaction.reply({ content: '❌ No verified users found in the database.', ephemeral: true });
         }
 
-        await interaction.reply({ content: `🚨 Emergency action started! Sending DMs to ${verifiedUserIds.length} verified users...`, ephemeral: true });
+        await interaction.reply({ content: `🚨 Notfall-Aktion gestartet! Sende zweisprachige DMs an ${verifiedUserIds.length} verifizierte User... / Emergency action started!`, ephemeral: true });
 
         let successCount = 0;
         let failCount = 0;
 
+        // --- ZWEISPRACHIGE NOTFALL-NACHRICHT (DEUTSCH & ENGLISCH) ---
         const embed = new EmbedBuilder()
             .setColor(0xed4245)
-            .setTitle('🚨 IMPORTANT: TP STOCK Emergency Move!')
-            .setDescription('Our main server has unfortunately changed or been banned. Join our new backup server immediately to continue your deals and community!')
-            .addFields({ name: '🔗 New Invite Link', value: inviteLink })
+            .setTitle('🚨 WICHTIG / IMPORTANT: TP STOCK Notfall-Umzug!')
+            .setDescription(
+                '🇩🇪 **Deutscher Server-Umzug:**\n' +
+                'Unser Hauptserver wurde leider gewechselt oder gesperrt. Tritt sofort unserem neuen Backup-Server bei, um deine Deals und Community fortzuführen!\n\n' +
+                '🇬🇧 **English Server Move:**\n' +
+                'Our main server has unfortunately changed or been banned. Join our new backup server immediately to continue your deals and community!'
+            )
+            .addFields({ name: '🔗 Einladungslink / Invite Link', value: inviteLink })
             .setTimestamp();
 
         const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
-                .setLabel('Join New Server')
+                .setLabel('Zum neuen Server / Join New Server')
                 .setStyle(ButtonStyle.Link)
                 .setURL(inviteLink)
                 .setEmoji('🚀')
@@ -535,7 +539,7 @@ client.on('interactionCreate', async interaction => {
         }
 
         await interaction.followUp({
-            content: `✅ Emergency action completed!\n- Successfully sent: **${successCount}** users\n- Failed (e.g., closed DMs): **${failCount}** users`,
+            content: `✅ Notfall-Aktion beendet!\n- Erfolgreich gesendet / Success: **${successCount}**\n- Fehlgeschlagen / Failed: **${failCount}**`,
             ephemeral: true
         });
     }
