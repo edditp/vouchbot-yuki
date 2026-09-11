@@ -1,4 +1,6 @@
-const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, ChannelType } = require('discord.js');
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const express = require('express');
+const { v4: uuidv4 } = require('uuid');
 
 const client = new Client({
     intents: [
@@ -9,9 +11,18 @@ const client = new Client({
     ]
 });
 
-// Nutzt sicher die Umgebungsvariablen für Token & Vouch-Channel von Railway
+const app = express();
+app.set('trust proxy', 1); // Wichtig für Railway/Proxies
+const PORT = process.env.PORT || 3000;
+
+// Speichert aktive Verifizierungen: Token -> Discord User ID
+const pendingVerifications = new Map();
+
+// Umgebungsvariablen von Railway
 const TOKEN = process.env.TOKEN;
 const VOUCH_CHANNEL_ID = process.env.VOUCH_CHANNEL_ID;
+// Optional: Web-URL für den Link (wichtig für Railway, z.B. https://dein-projekt.up.railway.app)
+const WEB_URL = process.env.WEB_URL || `http://localhost:${PORT}`;
 
 // Direkt eingetragene Statistik-Kanal-ID
 const STATS_MEMBERS_ID = '1540564623286214717'; 
@@ -35,13 +46,87 @@ const commands = [
         .addNumberOption(option => 
             option.setName('betrag')
                 .setDescription('Der Betrag in Euro (z.B. 180)')
-                .setRequired(true))
+                .setRequired(true)),
+    new SlashCommandBuilder()
+        .setName('setup-verify')
+        .setDescription('Sendet das Verifizierungs-Embed mit Button in den Kanal (Nur Admins)')
+        .setDefaultMemberPermissions(0)
 ].map(command => command.toJSON());
 
+// --- EXPRESS WEBSEITE (VERIFIZIERUNG & IP-ERFASSUNG) ---
+app.get('/verify', (req, res) => {
+    const { token } = req.query;
+
+    if (!token || !pendingVerifications.has(token)) {
+        return res.status(400).send('<h1>Ungültiger oder abgelaufener Link.</h1>');
+    }
+
+    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    console.log(`[VERIFY] IP erfasst: ${clientIp}`);
+
+    res.send(`
+        <!DOCTYPE html>
+        <html lang="de">
+        <head>
+            <meta charset="UTF-8">
+            <title>Discord Verifizierung</title>
+            <style>
+                body { font-family: Arial, sans-serif; background: #121212; color: #fff; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+                .card { background: #1e1e1e; padding: 40px; border-radius: 8px; text-align: center; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+                button { background: #5865F2; color: white; border: none; padding: 12px 24px; font-size: 16px; border-radius: 4px; cursor: pointer; margin-top: 20px; }
+                button:hover { background: #4752C4; }
+            </style>
+        </head>
+        <body>
+            <div class="card">
+                <h2>Server Verifizierung</h2>
+                <p>Klicke unten, um deine Verifizierung abzuschließen.</p>
+                <form action="/complete?token=${token}" method="POST">
+                    <button type="submit">Jetzt verifizieren</button>
+                </form>
+            </div>
+        </body>
+        </html>
+    `);
+});
+
+app.post('/complete', async (req, res) => {
+    const { token } = req.query;
+
+    if (!token || !pendingVerifications.has(token)) {
+        return res.status(400).send('<h1>Fehler: Ungültiger oder abgelaufener Link.</h1>');
+    }
+
+    const userId = pendingVerifications.get(token);
+    pendingVerifications.delete(token);
+
+    try {
+        // HIER DEINE SERVER-ID UND ROLLE-ID EINTRAGEN:
+        const guild = await client.guilds.fetch('1465511874199290082');
+        const member = await guild.members.fetch(userId);
+        const role = guild.roles.cache.get('1486063719825018913');
+
+        if (member && role) {
+            await member.roles.add(role);
+            res.send('<h1>Erfolgreich verifiziert! Du kannst dieses Fenster jetzt schließen und zu Discord zurückkehren.</h1>');
+        } else {
+            res.send('<h1>Fehler: Konnte Rolle nicht zuweisen (Mitglied oder Rolle nicht gefunden).</h1>');
+        }
+    } catch (error) {
+        console.error(error);
+        res.send('<h1>Ein interner Fehler ist aufgetreten.</h1>');
+    }
+});
+
+app.listen(PORT, () => {
+    console.log(`Webserver läuft auf Port ${PORT}`);
+});
+
+
+// --- DISCORD BOT LOGIK ---
 client.once('ready', async () => {
     console.log(`Eingeloggt als ${client.user.tag}!`);
 
-    // Slash-Commands registrieren
     const rest = new REST({ version: '10' }).setToken(TOKEN);
     try {
         await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
@@ -50,7 +135,6 @@ client.once('ready', async () => {
         console.error('Fehler bei Slash-Commands:', error);
     }
     
-    // Vouches initialisieren
     const channel = await client.channels.fetch(VOUCH_CHANNEL_ID).catch(() => null);
     if (channel && channel.isTextBased()) {
         const messages = await channel.messages.fetch({ limit: 100 });
@@ -58,16 +142,13 @@ client.once('ready', async () => {
         await sendStickyMessage(channel);
     }
 
-    // Statistiken beim Start einmal aktualisieren
     client.guilds.cache.forEach(guild => updateServerStats(guild));
     
-    // Intervall: Alle 15 Minuten Statistiken aktualisieren
     setInterval(() => {
         client.guilds.cache.forEach(guild => updateServerStats(guild));
     }, 15 * 60 * 1000);
 });
 
-// Funktion für Server-Statistiken
 async function updateServerStats(guild) {
     try {
         if (STATS_MEMBERS_ID) {
@@ -75,18 +156,6 @@ async function updateServerStats(guild) {
             if (memberChannel && memberChannel.type === ChannelType.GuildVoice) {
                 const memberCount = guild.memberCount;
                 await memberChannel.setName(`📊 Mitglieder: ${memberCount}`);
-                console.log(`Mitglieder-Statistik aktualisiert: ${memberCount}`);
-            } else {
-                console.log('Mitglieder-Kanal nicht gefunden oder kein Sprachkanal (ChannelType.GuildVoice)!');
-            }
-        }
-        
-        if (STATS_BOTS_ID) {
-            await guild.members.fetch();
-            const botCount = guild.members.cache.filter(member => member.user.bot).size;
-            const botChannel = guild.channels.cache.get(STATS_BOTS_ID);
-            if (botChannel && botChannel.type === ChannelType.GuildVoice) {
-                await botChannel.setName(`🤖 Bots: ${botCount}`);
             }
         }
     } catch (error) {
@@ -94,7 +163,6 @@ async function updateServerStats(guild) {
     }
 }
 
-// Events für Live-Update bei Beitritt/Verlassen
 client.on('guildMemberAdd', (member) => updateServerStats(member.guild));
 client.on('guildMemberRemove', (member) => updateServerStats(member.guild));
 
@@ -117,6 +185,20 @@ async function sendStickyMessage(channel) {
 }
 
 client.on('interactionCreate', async interaction => {
+    // Buttons verarbeiten
+    if (interaction.isButton() && interaction.customId === 'start_verification') {
+        const token = uuidv4();
+        pendingVerifications.set(token, interaction.user.id);
+        
+        const verifyLink = `${WEB_URL}/verify?token=${token}`;
+
+        await interaction.reply({
+            content: `Klicke auf den folgenden Link, um dich zu verifizieren:\n👉 **${verifyLink}**`,
+            ephemeral: true // Nur für den User sichtbar
+        });
+        return;
+    }
+
     if (!interaction.isChatInputCommand()) return;
     const { commandName } = interaction;
     const amount = interaction.options.getNumber('betrag');
@@ -141,6 +223,24 @@ client.on('interactionCreate', async interaction => {
             .setTitle(`Paysafe Exchange für ${amount.toFixed(2)} €`)
             .addFields({ name: '🔄 Fester Kurs (10% Abzug)', value: `Der Kunde erhält: **${pscAusgabe} €**`, inline: false });
         await interaction.reply({ embeds: [embed] });
+    }
+
+    if (commandName === 'setup-verify') {
+        const embed = new EmbedBuilder()
+            .setColor(0x5865F2)
+            .setTitle('🔐 Server-Verifizierung')
+            .setDescription('Klicke auf den Button unten, um dich zu verifizieren und Zugang zum Server zu erhalten.');
+
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId('start_verification')
+                .setLabel('Jetzt verifizieren')
+                .setStyle(ButtonStyle.Primary)
+                .setEmoji('✅')
+        );
+
+        await interaction.channel.send({ embeds: [embed], components: [row] });
+        await interaction.reply({ content: 'Verifizierungs-Nachricht erfolgreich gesendet!', ephemeral: true });
     }
 });
 
