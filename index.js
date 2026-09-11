@@ -370,59 +370,58 @@ client.on('interactionCreate', async interaction => {
         await interaction.reply({ content: 'Verifizierungs-Nachricht erfolgreich gesendet!', ephemeral: true });
     }
 
-    // --- NEU: NOTFALL-EINLADUNGS-BEFEHL ---
+    // --- NOTFALL-EINLADUNGS-BEFEHL (VERBESSERT) ---
     if (commandName === 'notfall-einladung') {
         const inviteLink = interaction.options.getString('link');
 
-        // Sofort dem Admin antworten, damit der Bot nicht in den Timeout läuft
-        await interaction.reply({ content: '🚨 Notfall-Aktion gestartet! Sende Einladungen an alle verifizierten User...', ephemeral: true });
+        await interaction.reply({ content: '🚨 Notfall-Aktion gestartet! Lade Mitgliederliste und versende DMs...', ephemeral: true });
 
-        // Alle Mitglieder des Servers abrufen
-        await interaction.guild.members.fetch();
+        try {
+            // Erzwinge das Laden aller Mitglieder vom Discord-Server
+            await interaction.guild.members.fetch({ force: true });
 
-        let successCount = 0;
-        let failCount = 0;
+            let successCount = 0;
+            let failCount = 0;
+            const verifiedRoleId = '1486063719825018913';
 
-        // Die Rolle, die verifizierte User haben (aus deiner Verifizierung)
-        const verifiedRoleId = '1486063719825018913';
+            const embed = new EmbedBuilder()
+                .setColor(0xed4245)
+                .setTitle('🚨 WICHTIG: TP STOCK Notfall-Umzug!')
+                .setDescription('Unser Hauptserver wurde leider gewechselt oder gesperrt. Tritt sofort unserem neuen Backup-Server bei, um deine Deals und Community fortzuführen!')
+                .addFields({ name: '🔗 Neuer Einladungslink', value: inviteLink })
+                .setTimestamp();
 
-        const embed = new EmbedBuilder()
-            .setColor(0xed4245)
-            .setTitle('🚨 WICHTIG: TP STOCK Notfall-Umzug!')
-            .setDescription('Unser Hauptserver wurde leider gesperrt oder hat gewechselt. Tritt sofort unserem neuen Backup-Server bei, um deine Deals und Community fortzuführen!')
-            .addFields({ name: '🔗 Neuer Einladungslink', value: inviteLink })
-            .setTimestamp();
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setLabel('Zum neuen Server')
+                    .setStyle(ButtonStyle.Link)
+                    .setURL(inviteLink)
+                    .setEmoji('🚀')
+            );
 
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setLabel('Zum neuen Server')
-                .setStyle(ButtonStyle.Link)
-                .setURL(inviteLink)
-                .setEmoji('🚀')
-        );
+            for (const [memberId, member] of interaction.guild.members.cache) {
+                if (member.user.bot) continue;
 
-        // Durch alle Mitglieder iterieren
-        for (const [memberId, member] of interaction.guild.members.cache) {
-            if (member.user.bot) continue; // Bots überspringen
-
-            // Prüfen ob das Mitglied die verifizierte Rolle hat
-            if (member.roles.cache.has(verifiedRoleId)) {
-                try {
-                    await member.send({ embeds: [embed], components: [row] });
-                    successCount++;
-                    // Kleine Pause, um Discord Rate-Limits zu umgehen
-                    await new Promise(resolve => setTimeout(resolve, 500));
-                } catch (err) {
-                    failCount++; // Falls User Direktnachrichten deaktiviert hat
+                if (member.roles.cache.has(verifiedRoleId)) {
+                    try {
+                        await member.send({ embeds: [embed], components: [row] });
+                        successCount++;
+                        await new Promise(resolve => setTimeout(resolve, 600)); // Rate-Limit Schutz
+                    } catch (err) {
+                        failCount++;
+                    }
                 }
             }
-        }
 
-        // Abschlussbericht an den Admin senden
-        await interaction.followUp({
-            content: `✅ Notfall-Aktion beendet!\n- Erfolgreich gesendet: **${successCount}** User\n- Fehlgeschlagen (z.B. DM deaktiviert): **${failCount}** User`,
-            ephemeral: true
-        });
+            await interaction.followUp({
+                content: `✅ Notfall-Aktion beendet!\n- Erfolgreich gesendet: **${successCount}** User\n- Fehlgeschlagen (z.B. DMs geschlossen): **${failCount}** User`,
+                ephemeral: true
+            });
+
+        } catch (error) {
+            console.error('Fehler beim Notfall-Befehl:', error);
+            await interaction.followUp({ content: '❌ Ein Fehler ist aufgetreten (Fehlende Berechtigungen oder Intents).', ephemeral: true });
+        }
     }
 });
 
