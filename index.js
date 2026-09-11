@@ -184,16 +184,14 @@ async function sendStickyMessage(channel) {
 }
 
 client.on('interactionCreate', async interaction => {
-    // Buttons verarbeiten (mit DeferReply gegen Zeitüberschreitungen)
+    // Buttons verarbeiten (Direktantwort ohne Hängenbleiben)
     if (interaction.isButton() && interaction.customId === 'start_verification') {
-        await interaction.deferReply({ ephemeral: true });
-
         const token = uuidv4();
         pendingVerifications.set(token, interaction.user.id);
         
         const verifyLink = `${WEB_URL}/verify?token=${token}`;
 
-        await interaction.editReply({
+        await interaction.reply({
             content: `Klicke auf den folgenden Button, um dich zu verifizieren:`,
             components: [
                 new ActionRowBuilder().addComponents(
@@ -203,7 +201,8 @@ client.on('interactionCreate', async interaction => {
                         .setURL(verifyLink)
                         .setEmoji('🌐')
                 )
-            ]
+            ],
+            ephemeral: true
         });
         return;
     }
