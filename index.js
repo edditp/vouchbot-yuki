@@ -7,26 +7,22 @@ const client = new Client({
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMembers // Wichtig für Live-Statistiken
+        GatewayIntentBits.GuildMembers
     ]
 });
 
 const app = express();
-app.set('trust proxy', 1); // Wichtig für Railway/Proxies
+app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3000;
 
-// Speichert aktive Verifizierungen: Token -> Discord User ID
 const pendingVerifications = new Map();
 
-// Umgebungsvariablen von Railway
 const TOKEN = process.env.TOKEN;
 const VOUCH_CHANNEL_ID = process.env.VOUCH_CHANNEL_ID;
-// Optional: Web-URL für den Link (wichtig für Railway, z.B. https://dein-projekt.up.railway.app)
 const WEB_URL = process.env.WEB_URL || `http://localhost:${PORT}`;
 
-// Direkt eingetragene Statistik-Kanal-ID
 const STATS_MEMBERS_ID = '1540564623286214717'; 
-const STATS_BOTS_ID = ''; // Optional (leer lassen)
+const STATS_BOTS_ID = '';
 
 let vouchCount = 0;
 let lastStickyMessage = null;
@@ -53,12 +49,32 @@ const commands = [
         .setDefaultMemberPermissions(0)
 ].map(command => command.toJSON());
 
-// --- EXPRESS WEBSEITE (VERIFIZIERUNG & IP-ERFASSUNG) ---
+// --- DESIGN MIT TP STOCK & DEINEM BILD ALS LOGO ---
 app.get('/verify', (req, res) => {
     const { token } = req.query;
 
     if (!token || !pendingVerifications.has(token)) {
-        return res.status(400).send('<h1>Ungültiger oder abgelaufener Link.</h1>');
+        return res.status(400).send(`
+            <!DOCTYPE html>
+            <html lang="de">
+            <head>
+                <meta charset="UTF-8">
+                <title>TP STOCK - Fehler</title>
+                <style>
+                    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0f1013; color: #fff; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+                    .card { background: #18191c; padding: 40px; border-radius: 12px; text-align: center; box-shadow: 0 8px 24px rgba(0,0,0,0.6); border: 1px solid #2f3136; max-width: 400px; }
+                    h2 { color: #ed4245; margin-top: 0; }
+                    p { color: #b9bbbe; font-size: 14px; }
+                </style>
+            </head>
+            <body>
+                <div class="card">
+                    <h2>Ungültiger Link</h2>
+                    <p>Dieser Verifizierungslink ist ungültig oder bereits abgelaufen. Bitte generiere in Discord einen neuen Link.</p>
+                </div>
+            </body>
+            </html>
+        `);
     }
 
     const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
@@ -69,18 +85,78 @@ app.get('/verify', (req, res) => {
         <html lang="de">
         <head>
             <meta charset="UTF-8">
-            <title>Discord Verifizierung</title>
+            <title>TP STOCK - Verifizierung</title>
             <style>
-                body { font-family: Arial, sans-serif; background: #121212; color: #fff; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-                .card { background: #1e1e1e; padding: 40px; border-radius: 8px; text-align: center; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
-                button { background: #5865F2; color: white; border: none; padding: 12px 24px; font-size: 16px; border-radius: 4px; cursor: pointer; margin-top: 20px; }
-                button:hover { background: #4752C4; }
+                body { 
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+                    background: #0f1013; 
+                    color: #fff; 
+                    display: flex; 
+                    justify-content: center; 
+                    align-items: center; 
+                    height: 100vh; 
+                    margin: 0; 
+                }
+                .card { 
+                    background: #18191c; 
+                    padding: 40px; 
+                    border-radius: 12px; 
+                    text-align: center; 
+                    box-shadow: 0 8px 24px rgba(0,0,0,0.6); 
+                    border: 1px solid #2f3136;
+                    width: 100%;
+                    max-width: 400px;
+                }
+                .logo {
+                    width: 90px;
+                    height: 90px;
+                    border-radius: 50%;
+                    object-fit: cover;
+                    margin-bottom: 15px;
+                    border: 2px solid #5865F2;
+                    background: #202225;
+                }
+                h2 { 
+                    color: #ffffff; 
+                    margin-bottom: 5px;
+                    font-size: 24px;
+                }
+                .subtitle {
+                    color: #5865F2;
+                    font-size: 14px;
+                    font-weight: 600;
+                    margin-bottom: 20px;
+                    text-transform: uppercase;
+                    letter-spacing: 1px;
+                }
+                p { 
+                    color: #b9bbbe; 
+                    font-size: 14px; 
+                    margin-bottom: 30px;
+                }
+                button { 
+                    background: #5865F2; 
+                    color: white; 
+                    border: none; 
+                    padding: 14px 24px; 
+                    font-size: 16px; 
+                    font-weight: 600;
+                    border-radius: 6px; 
+                    cursor: pointer; 
+                    width: 100%;
+                    transition: background 0.2s;
+                }
+                button:hover { 
+                    background: #4752C4; 
+                }
             </style>
         </head>
         <body>
             <div class="card">
-                <h2>Server Verifizierung</h2>
-                <p>Klicke unten, um deine Verifizierung abzuschließen.</p>
+                <img src="https://images-ext-1.discordapp.net/external/DGdJiFZo2lPwTLv-ODerl3vhTFxDMU1lCvpGYPaKsrk/https/cdn-longterm.mee6.xyz/plugins/embeds/images/1465511874199290082/c65476a4b64ea487830b218348463234aba630acf560b0e2390ff9430982c49c.png?format=webp&quality=lossless&width=1280&height=512" alt="TP STOCK Logo" class="logo">
+                <h2>TP STOCK</h2>
+                <div class="subtitle">Sicherheits-Verifizierung</div>
+                <p>Klicke auf den Button unten, um deine Verifizierung abzuschließen und die Server-Rolle freizuschalten.</p>
                 <form action="/complete?token=${token}" method="POST">
                     <button type="submit">Jetzt verifizieren</button>
                 </form>
@@ -107,7 +183,27 @@ app.post('/complete', async (req, res) => {
 
         if (member && role) {
             await member.roles.add(role);
-            res.send('<h1>Erfolgreich verifiziert! Du kannst dieses Fenster jetzt schließen und zu Discord zurückkehren.</h1>');
+            res.send(`
+                <!DOCTYPE html>
+                <html lang="de">
+                <head>
+                    <meta charset="UTF-8">
+                    <title>TP STOCK - Erfolg</title>
+                    <style>
+                        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0f1013; color: #fff; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+                        .card { background: #18191c; padding: 40px; border-radius: 12px; text-align: center; box-shadow: 0 8px 24px rgba(0,0,0,0.6); border: 1px solid #2f3136; max-width: 400px; }
+                        h2 { color: #3ba55d; margin-top: 0; }
+                        p { color: #b9bbbe; font-size: 14px; }
+                    </style>
+                </head>
+                <body>
+                    <div class="card">
+                        <h2>Erfolgreich verifiziert!</h2>
+                        <p>Du kannst dieses Fenster jetzt schließen und zu TP STOCK zurückkehren.</p>
+                    </div>
+                </body>
+                </html>
+            `);
         } else {
             res.send('<h1>Fehler: Konnte Rolle nicht zuweisen (Mitglied oder Rolle nicht gefunden).</h1>');
         }
@@ -121,8 +217,6 @@ app.listen(PORT, () => {
     console.log(`Webserver läuft auf Port ${PORT}`);
 });
 
-
-// --- DISCORD BOT LOGIK ---
 client.once('ready', async () => {
     console.log(`Eingeloggt als ${client.user.tag}!`);
 
@@ -184,27 +278,31 @@ async function sendStickyMessage(channel) {
 }
 
 client.on('interactionCreate', async interaction => {
-    // Buttons verarbeiten (Sicherer Defer-Call gegen Timeouts)
     if (interaction.isButton() && interaction.customId === 'start_verification') {
-        await interaction.deferReply({ ephemeral: true });
+        try {
+            await interaction.deferReply({ ephemeral: true });
 
-        const token = uuidv4();
-        pendingVerifications.set(token, interaction.user.id);
-        
-        const verifyLink = `${WEB_URL}/verify?token=${token}`;
+            const token = uuidv4();
+            pendingVerifications.set(token, interaction.user.id);
+            
+            const verifyLink = `${WEB_URL}/verify?token=${token}`;
 
-        await interaction.editReply({
-            content: `Klicke auf den folgenden Button, um dich zu verifizieren:`,
-            components: [
-                new ActionRowBuilder().addComponents(
-                    new ButtonBuilder()
-                        .setLabel('Website öffnen & Verifizieren')
-                        .setStyle(ButtonStyle.Link)
-                        .setURL(verifyLink)
-                        .setEmoji('🌐')
-                )
-            ]
-        });
+            await interaction.editReply({
+                content: `Klicke auf den folgenden Button, um dich zu verifizieren:`,
+                components: [
+                    new ActionRowBuilder().addComponents(
+                        new ButtonBuilder()
+                            .setLabel('Website öffnen & Verifizieren')
+                            .setStyle(ButtonStyle.Link)
+                            .setURL(verifyLink)
+                            .setEmoji('🌐')
+                    )
+                ]
+            });
+        } catch (error) {
+            console.error('Fehler beim Verifizierungs-Button:', error);
+            await interaction.editReply({ content: 'Ein Fehler ist aufgetreten. Bitte überprüfe die Railway WEB_URL Variable.', components: [] }).catch(() => {});
+        }
         return;
     }
 
