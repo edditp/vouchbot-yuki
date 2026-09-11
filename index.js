@@ -314,7 +314,7 @@ client.on('interactionCreate', async interaction => {
             });
         } catch (error) {
             console.error('Fehler beim Verifizierungs-Button:', error);
-            await interaction.editReply({ content: 'Ein Fehler ist aufgetreten. Bitte überprüfe die Railway WEB_URL Variable.', components: [] }).catch(() => {});
+            await interaction.editReply({ content: 'Ein Fehler ist aufgetreten. Bitte überprüfe die WEB_URL Variable.', components: [] }).catch(() => {});
         }
         return;
     }
@@ -370,14 +370,13 @@ client.on('interactionCreate', async interaction => {
         await interaction.reply({ content: 'Verifizierungs-Nachricht erfolgreich gesendet!', ephemeral: true });
     }
 
-    // --- NOTFALL-EINLADUNGS-BEFEHL (VERBESSERT) ---
+    // --- NOTFALL-EINLADUNGS-BEFEHL MIT DETAILLIERTEM LOG ---
     if (commandName === 'notfall-einladung') {
         const inviteLink = interaction.options.getString('link');
 
         await interaction.reply({ content: '🚨 Notfall-Aktion gestartet! Lade Mitgliederliste und versende DMs...', ephemeral: true });
 
         try {
-            // Erzwinge das Laden aller Mitglieder vom Discord-Server
             await interaction.guild.members.fetch({ force: true });
 
             let successCount = 0;
@@ -406,7 +405,7 @@ client.on('interactionCreate', async interaction => {
                     try {
                         await member.send({ embeds: [embed], components: [row] });
                         successCount++;
-                        await new Promise(resolve => setTimeout(resolve, 600)); // Rate-Limit Schutz
+                        await new Promise(resolve => setTimeout(resolve, 600));
                     } catch (err) {
                         failCount++;
                     }
@@ -419,8 +418,9 @@ client.on('interactionCreate', async interaction => {
             });
 
         } catch (error) {
-            console.error('Fehler beim Notfall-Befehl:', error);
-            await interaction.followUp({ content: '❌ Ein Fehler ist aufgetreten (Fehlende Berechtigungen oder Intents).', ephemeral: true });
+            console.error('SCHWERER FEHLER IM NOTFALL-BEFEHL:', error);
+            // Gibt den echten technischen Fehler im Discord-Chat aus, damit wir sehen, was klemmt
+            await interaction.followUp({ content: `❌ Fehler: \`${error.message}\``, ephemeral: true });
         }
     }
 });
