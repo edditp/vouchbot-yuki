@@ -49,7 +49,7 @@ const commands = [
         .setDefaultMemberPermissions(0)
 ].map(command => command.toJSON());
 
-// --- DESIGN MIT TP STOCK & DEINEM BILD ALS LOGO ---
+// --- WEBSERVER DESIGN ---
 app.get('/verify', (req, res) => {
     const { token } = req.query;
 
@@ -287,8 +287,14 @@ client.on('interactionCreate', async interaction => {
             
             const verifyLink = `${WEB_URL}/verify?token=${token}`;
 
+            // Schickere Antwort als Embed in der privaten Nachricht
+            const replyEmbed = new EmbedBuilder()
+                .setColor(0x5865F2)
+                .setTitle('🛡️ Dein persönlicher Verifizierungs-Link')
+                .setDescription('Klicke auf den Button unten, um den Vorgang in deinem Browser zu starten.');
+
             await interaction.editReply({
-                content: `Klicke auf den folgenden Button, um dich zu verifizieren:`,
+                embeds: [replyEmbed],
                 components: [
                     new ActionRowBuilder().addComponents(
                         new ButtonBuilder()
@@ -333,10 +339,18 @@ client.on('interactionCreate', async interaction => {
     }
 
     if (commandName === 'setup-verify') {
+        // Schickeres Haupt-Embed für den Kanal mit Feldern und Thumbnail
         const embed = new EmbedBuilder()
             .setColor(0x5865F2)
-            .setTitle('🔐 Server-Verifizierung')
-            .setDescription('Klicke auf den Button unten, um dich zu verifizieren und Zugang zum Server zu erhalten.');
+            .setTitle('🔐 · TP STOCK VERIFIZIERUNG')
+            .setDescription('Willkommen auf **TP STOCK**! Um vollen Zugriff auf den Server zu erhalten und dich gegen Bot-Accounts zu schützen, klicke bitte auf den Button unten.')
+            .addFields(
+                { name: '✨ Deine Vorteile nach der Verifizierung', value: '• Zugriff auf alle Kanäle\n• Teilnehme an Giveaways & Deals\n• Automatischer Rollen-Erhalt', inline: false },
+                { name: '⚠️ Hinweis', value: 'Der Link ist einmalig und exklusiv für dich generiert.', inline: false }
+            )
+            .setThumbnail('https://images-ext-1.discordapp.net/external/DGdJiFZo2lPwTLv-ODerl3vhTFxDMU1lCvpGYPaKsrk/https/cdn-longterm.mee6.xyz/plugins/embeds/images/1465511874199290082/c65476a4b64ea487830b218348463234aba630acf560b0e2390ff9430982c49c.png?format=webp&quality=lossless&width=1280&height=512')
+            .setFooter({ text: 'TP STOCK Security System', iconURL: client.user.displayAvatarURL() })
+            .setTimestamp();
 
         const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
