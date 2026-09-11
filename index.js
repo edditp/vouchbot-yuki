@@ -15,11 +15,14 @@ const client = new Client({
 
 const app = express();
 app.set('trust proxy', 1);
+app.use(express.urlencoded({ extended: true }));
+
 const PORT = process.env.PORT || 3000;
 
 const pendingVerifications = new Map();
+const cooldowns = new Map();
+const recentIps = new Map();
 
-// --- DAUERHAFTE SPEICHERUNG DER VERIFIZIERTEN USER ---
 const DATA_FILE = path.join(__dirname, 'verified_users.json');
 
 function loadVerifiedUsers() {
@@ -48,6 +51,7 @@ function saveVerifiedUser(userId) {
 
 const TOKEN = process.env.TOKEN;
 const VOUCH_CHANNEL_ID = process.env.VOUCH_CHANNEL_ID;
+const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID || '';
 const WEB_URL = process.env.WEB_URL || `http://localhost:${PORT}`;
 
 const STATS_MEMBERS_ID = '1540564623286214717'; 
@@ -78,7 +82,7 @@ const commands = [
         .setDefaultMemberPermissions(0),
     new SlashCommandBuilder()
         .setName('notfall-einladung')
-        .setDescription('Sendet den Backup-Einladungslink an alle gespeicherten verifizierten User')
+        .setDescription('Sendet den Einladungslink an alle gespeicherten verifizierten User')
         .setDefaultMemberPermissions(0)
         .addStringOption(option =>
             option.setName('link')
@@ -86,7 +90,7 @@ const commands = [
                 .setRequired(true))
 ].map(command => command.toJSON());
 
-// --- WEBSERVER DESIGN ---
+// --- WEBSERVER MIT INTERNATIONALES CAPTCHA ---
 app.get('/verify', (req, res) => {
     const { token } = req.query;
 
@@ -96,7 +100,7 @@ app.get('/verify', (req, res) => {
             <html lang="de">
             <head>
                 <meta charset="UTF-8">
-                <title>TP STOCK - Fehler</title>
+                <title>TP STOCK - Error</title>
                 <style>
                     body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0f1013; color: #fff; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
                     .card { background: #18191c; padding: 40px; border-radius: 12px; text-align: center; box-shadow: 0 8px 24px rgba(0,0,0,0.6); border: 1px solid #2f3136; max-width: 400px; }
@@ -106,23 +110,43 @@ app.get('/verify', (req, res) => {
             </head>
             <body>
                 <div class="card">
-                    <h2>Ungültiger Link</h2>
-                    <p>Dieser Verifizierungslink ist ungültig oder bereits abgelaufen. Bitte generiere in Discord einen neuen Link.</p>
+                    <h2>Invalid Link</h2>
+                    <p>This verification link is invalid or has expired. Please generate a new one in Discord.</p>
                 </div>
             </body>
             </html>
         `);
     }
 
+    const verificationData = pendingVerifications.get(token);
+    
     const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-    console.log(`[VERIFY] IP erfasst: ${clientIp}`);
+    const now = Date.now();
+    if (recentIps.has(clientIp) && now - recentIps.get(clientIp) < 15 * 60 * 1000) {
+        return res.status(429).send(`
+            <!DOCTYPE html>
+            <html lang="en">
+            <head><meta charset="UTF-8"><title>Too Many Requests</title></head>
+            <body style="background:#0f1013;color:#fff;font-family:sans-serif;text-align:center;padding-top:100px;">
+                <h2>⚠️ Too Many Requests</h2>
+                <p>A verification was recently completed from your IP address. Please wait a moment.</p>
+            </body>
+            </html>
+        `);
+    }
+
+    // Universelles Captcha (Zahlen und einfache Mathe-Syntax, weltweit verständlich)
+    const num1 = Math.floor(Math.random() * 8) + 2;
+    const num2 = Math.floor(Math.random() * 8) + 2;
+    const captchaAnswer = num1 + num2;
+    verificationData.captchaAnswer = captchaAnswer;
 
     res.send(`
         <!DOCTYPE html>
-        <html lang="de">
+        <html lang="en">
         <head>
             <meta charset="UTF-8">
-            <title>TP STOCK - Verifizierung</title>
+            <title>TP STOCK - Security Check</title>
             <style>
                 body { 
                     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
@@ -169,8 +193,21 @@ app.get('/verify', (req, res) => {
                 p { 
                     color: #b9bbbe; 
                     font-size: 14px; 
-                    margin-bottom: 30px;
+                    margin-bottom: 20px; 
                 }
+                input { 
+                    background: #202225; 
+                    border: 1px solid #4f545c; 
+                    color: white; 
+                    padding: 12px; 
+                    font-size: 18px; 
+                    border-radius: 6px; 
+                    width: 80%; 
+                    text-align: center; 
+                    margin-bottom: 20px; 
+                    outline: none; 
+                }
+                input:focus { border-color: #5865F2; }
                 button { 
                     background: #5865F2; 
                     color: white; 
@@ -180,22 +217,22 @@ app.get('/verify', (req, res) => {
                     font-weight: 600;
                     border-radius: 6px; 
                     cursor: pointer; 
-                    width: 100%;
-                    transition: background 0.2s;
+                    width: 100%; 
+                    transition: background 0.2s; 
                 }
-                button:hover { 
-                    background: #4752C4; 
-                }
+                button:hover { background: #4752C4; }
             </style>
         </head>
         <body>
             <div class="card">
                 <img src="https://images-ext-1.discordapp.net/external/DGdJiFZo2lPwTLv-ODerl3vhTFxDMU1lCvpGYPaKsrk/https/cdn-longterm.mee6.xyz/plugins/embeds/images/1465511874199290082/c65476a4b64ea487830b218348463234aba630acf560b0e2390ff9430982c49c.png?format=webp&quality=lossless&width=1280&height=512" alt="TP STOCK Logo" class="logo">
                 <h2>TP STOCK</h2>
-                <div class="subtitle">Sicherheits-Verifizierung</div>
-                <p>Klicke auf den Button unten, um deine Verifizierung abzuschließen und die Server-Rolle freizuschalten.</p>
+                <div class="subtitle">Security Check</div>
+                <p>Please solve this to prove you are human:</p>
                 <form action="/complete?token=${token}" method="POST">
-                    <button type="submit">Jetzt verifizieren</button>
+                    <p style="font-weight: bold; color: #fff; font-size: 20px; margin-bottom: 12px; letter-spacing: 2px;">${num1} + ${num2} = ?</p>
+                    <input type="number" name="captcha" placeholder="Answer" required autocomplete="off">
+                    <button type="submit">Complete Verification</button>
                 </form>
             </div>
         </body>
@@ -205,13 +242,32 @@ app.get('/verify', (req, res) => {
 
 app.post('/complete', async (req, res) => {
     const { token } = req.query;
+    const userAnswer = parseInt(req.body.captcha, 10);
 
     if (!token || !pendingVerifications.has(token)) {
-        return res.status(400).send('<h1>Fehler: Ungültiger oder abgelaufener Link.</h1>');
+        return res.status(400).send('<h1>Error: Invalid or expired link.</h1>');
     }
 
-    const userId = pendingVerifications.get(token);
+    const verificationData = pendingVerifications.get(token);
+
+    if (userAnswer !== verificationData.captchaAnswer) {
+        return res.status(400).send(`
+            <!DOCTYPE html>
+            <html lang="en">
+            <head><meta charset="UTF-8"><title>Wrong Answer</title></head>
+            <body style="background:#0f1013;color:#fff;font-family:sans-serif;text-align:center;padding-top:100px;">
+                <h2 style="color:#ed4245;">❌ Incorrect Answer</h2>
+                <p>You solved the math problem incorrectly. Please go back to Discord and start the verification again.</p>
+            </body>
+            </html>
+        `);
+    }
+
+    const userId = verificationData.userId;
     pendingVerifications.delete(token);
+
+    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    recentIps.set(clientIp, Date.now());
 
     try {
         const guild = await client.guilds.fetch('1465511874199290082');
@@ -220,16 +276,29 @@ app.post('/complete', async (req, res) => {
 
         if (member && role) {
             await member.roles.add(role);
-            
-            // User permanent in der JSON-Datei abspeichern!
             saveVerifiedUser(userId);
+
+            if (LOG_CHANNEL_ID) {
+                const logChannel = await client.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
+                if (logChannel && logChannel.isTextBased()) {
+                    const logEmbed = new EmbedBuilder()
+                        .setColor(0x3ba55d)
+                        .setTitle('🛡️ New Successful Verification')
+                        .addFields(
+                            { name: 'Member', value: `<@${userId}> (${userId})`, inline: true },
+                            { name: 'IP Address', value: `\`${clientIp}\``, inline: true }
+                        )
+                        .setTimestamp();
+                    await logChannel.send({ embeds: [logEmbed] }).catch(() => {});
+                }
+            }
 
             res.send(`
                 <!DOCTYPE html>
-                <html lang="de">
+                <html lang="en">
                 <head>
                     <meta charset="UTF-8">
-                    <title>TP STOCK - Erfolg</title>
+                    <title>TP STOCK - Success</title>
                     <style>
                         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0f1013; color: #fff; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
                         .card { background: #18191c; padding: 40px; border-radius: 12px; text-align: center; box-shadow: 0 8px 24px rgba(0,0,0,0.6); border: 1px solid #2f3136; max-width: 400px; }
@@ -239,18 +308,18 @@ app.post('/complete', async (req, res) => {
                 </head>
                 <body>
                     <div class="card">
-                        <h2>Erfolgreich verifiziert!</h2>
-                        <p>Du kannst dieses Fenster jetzt schließen und zu TP STOCK zurückkehren.</p>
+                        <h2>Successfully Verified!</h2>
+                        <p>You can now close this window and return to Discord.</p>
                     </div>
                 </body>
                 </html>
             `);
         } else {
-            res.send('<h1>Fehler: Konnte Rolle nicht zuweisen (Mitglied oder Rolle nicht gefunden).</h1>');
+            res.send('<h1>Error: Could not assign role (Member or role not found).</h1>');
         }
     } catch (error) {
         console.error(error);
-        res.send('<h1>Ein interner Fehler ist aufgetreten.</h1>');
+        res.send('<h1>An internal error occurred.</h1>');
     }
 });
 
@@ -321,24 +390,34 @@ async function sendStickyMessage(channel) {
 client.on('interactionCreate', async interaction => {
     if (interaction.isButton() && interaction.customId === 'start_verification') {
         try {
+            const now = Date.now();
+            if (cooldowns.has(interaction.user.id)) {
+                const expirationTime = cooldowns.get(interaction.user.id) + 5000;
+                if (now < expirationTime) {
+                    const timeLeft = ((expirationTime - now) / 1000).toFixed(1);
+                    return interaction.reply({ content: `⏳ Please wait ${timeLeft} seconds before requesting a new link.`, ephemeral: true });
+                }
+            }
+            cooldowns.set(interaction.user.id, now);
+
             await interaction.deferReply({ ephemeral: true });
 
             const token = uuidv4();
-            pendingVerifications.set(token, interaction.user.id);
+            pendingVerifications.set(token, { userId: interaction.user.id });
             
             const verifyLink = `${WEB_URL}/verify?token=${token}`;
 
             const replyEmbed = new EmbedBuilder()
                 .setColor(0x5865F2)
-                .setTitle('🛡️ Dein persönlicher Verifizierungs-Link')
-                .setDescription('Klicke auf den Button unten, um den Vorgang in deinem Browser zu starten.');
+                .setTitle('🛡️ Your Verification Link')
+                .setDescription('Click the button below to start the security check in your browser.');
 
             await interaction.editReply({
                 embeds: [replyEmbed],
                 components: [
                     new ActionRowBuilder().addComponents(
                         new ButtonBuilder()
-                            .setLabel('Website öffnen & Verifizieren')
+                            .setLabel('Open Website & Verify')
                             .setStyle(ButtonStyle.Link)
                             .setURL(verifyLink)
                             .setEmoji('🌐')
@@ -347,7 +426,7 @@ client.on('interactionCreate', async interaction => {
             });
         } catch (error) {
             console.error('Fehler beim Verifizierungs-Button:', error);
-            await interaction.editReply({ content: 'Ein Fehler ist aufgetreten. Bitte überprüfe die WEB_URL Variable.', components: [] }).catch(() => {});
+            await interaction.editReply({ content: 'An error occurred. Please check the WEB_URL variable.', components: [] }).catch(() => {});
         }
         return;
     }
@@ -381,11 +460,11 @@ client.on('interactionCreate', async interaction => {
     if (commandName === 'setup-verify') {
         const embed = new EmbedBuilder()
             .setColor(0x5865F2)
-            .setTitle('🔐 · TP STOCK VERIFIZIERUNG')
-            .setDescription('Willkommen auf **TP STOCK**! Um vollen Zugriff auf den Server zu erhalten und dich gegen Bot-Accounts zu schützen, klicke bitte auf den Button unten.')
+            .setTitle('🔐 · TP STOCK VERIFICATION')
+            .setDescription('Welcome to **TP STOCK**! To get full access to the server and protect against bot accounts, please click the button below.')
             .addFields(
-                { name: '✨ Deine Vorteile nach der Verifizierung', value: '• Zugriff auf alle Kanäle\n• Teilnehme an Giveaways & Deals\n• Automatischer Rollen-Erhalt', inline: false },
-                { name: '⚠️ Hinweis', value: 'Der Link ist einmalig und exklusiv für dich generiert.', inline: false }
+                { name: '✨ Your Benefits', value: '• Access to all channels\n• Participate in giveaways & deals\n• Automatic role assignment', inline: false },
+                { name: '⚠️ Notice', value: 'This link is unique and generated exclusively for you.', inline: false }
             )
             .setImage('https://images-ext-1.discordapp.net/external/DGdJiFZo2lPwTLv-ODerl3vhTFxDMU1lCvpGYPaKsrk/https/cdn-longterm.mee6.xyz/plugins/embeds/images/1465511874199290082/c65476a4b64ea487830b218348463234aba630acf560b0e2390ff9430982c49c.png?format=webp&quality=lossless&width=1280&height=512')
             .setFooter({ text: 'TP STOCK Security System', iconURL: client.user.displayAvatarURL() })
@@ -394,57 +473,54 @@ client.on('interactionCreate', async interaction => {
         const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
                 .setCustomId('start_verification')
-                .setLabel('Jetzt verifizieren')
+                .setLabel('Verify Now')
                 .setStyle(ButtonStyle.Primary)
                 .setEmoji('✅')
         );
 
         await interaction.channel.send({ embeds: [embed], components: [row] });
-        await interaction.reply({ content: 'Verifizierungs-Nachricht erfolgreich gesendet!', ephemeral: true });
+        await interaction.reply({ content: 'Verification message sent successfully!', ephemeral: true });
     }
 
-    // --- NOTFALL-BEFEHL (ÜBER DIE GESPEICHERTE JSON-LISTE) ---
     if (commandName === 'notfall-einladung') {
         if (!interaction.guild) {
-            return interaction.reply({ content: '❌ Dieser Befehl kann nur auf einem Server ausgeführt werden!', ephemeral: true });
+            return interaction.reply({ content: '❌ This command can only be used on a server!', ephemeral: true });
         }
 
         const inviteLink = interaction.options.getString('link');
         const verifiedUserIds = loadVerifiedUsers();
 
         if (verifiedUserIds.length === 0) {
-            return interaction.reply({ content: '❌ Es sind bisher keine verifizierten User in der Datenbank gespeichert.', ephemeral: true });
+            return interaction.reply({ content: '❌ No verified users found in the database.', ephemeral: true });
         }
 
-        await interaction.reply({ content: `🚨 Notfall-Aktion gestartet! Sende DMs an ${verifiedUserIds.length} verifizierte User...`, ephemeral: true });
+        await interaction.reply({ content: `🚨 Emergency action started! Sending DMs to ${verifiedUserIds.length} verified users...`, ephemeral: true });
 
         let successCount = 0;
         let failCount = 0;
 
         const embed = new EmbedBuilder()
             .setColor(0xed4245)
-            .setTitle('🚨 WICHTIG: TP STOCK Notfall-Umzug!')
-            .setDescription('Unser Hauptserver wurde leider gewechselt oder gesperrt. Tritt sofort unserem neuen Backup-Server bei, um deine Deals und Community fortzuführen!')
-            .addFields({ name: '🔗 Neuer Einladungslink', value: inviteLink })
+            .setTitle('🚨 IMPORTANT: TP STOCK Emergency Move!')
+            .setDescription('Our main server has unfortunately changed or been banned. Join our new backup server immediately to continue your deals and community!')
+            .addFields({ name: '🔗 New Invite Link', value: inviteLink })
             .setTimestamp();
 
         const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
-                .setLabel('Zum neuen Server')
+                .setLabel('Join New Server')
                 .setStyle(ButtonStyle.Link)
                 .setURL(inviteLink)
                 .setEmoji('🚀')
         );
 
-        // Geht alle jemals verifizierten IDs aus der Datei durch (funktioniert von jedem Server aus!)
         for (const userId of verifiedUserIds) {
             try {
-                // Versuche den User über den Bot zu erreichen und anzuschreiben
                 const user = await client.users.fetch(userId);
                 if (user) {
                     await user.send({ embeds: [embed], components: [row] });
                     successCount++;
-                    await new Promise(resolve => setTimeout(resolve, 600)); // Rate-Limit Schutz
+                    await new Promise(resolve => setTimeout(resolve, 600));
                 }
             } catch (err) {
                 failCount++;
@@ -452,7 +528,7 @@ client.on('interactionCreate', async interaction => {
         }
 
         await interaction.followUp({
-            content: `✅ Notfall-Aktion beendet!\n- Erfolgreich gesendet: **${successCount}** User\n- Fehlgeschlagen (z.B. DMs geschlossen): **${failCount}** User`,
+            content: `✅ Emergency action completed!\n- Successfully sent: **${successCount}** users\n- Failed (e.g., closed DMs): **${failCount}** users`,
             ephemeral: true
         });
     }
