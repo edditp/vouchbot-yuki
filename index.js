@@ -51,7 +51,11 @@ function saveVerifiedUser(userId) {
 
 const TOKEN = process.env.TOKEN;
 const VOUCH_CHANNEL_ID = process.env.VOUCH_CHANNEL_ID;
-const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID || '';
+
+// --- ZWEI LOG-KANÄLE (ÜBER RAILWAY VARIABLES STEUERBAR) ---
+const LOG_CHANNEL_1 = process.env.LOG_CHANNEL_ID || '';
+const LOG_CHANNEL_2 = process.env.LOG_CHANNEL_ID_2 || '';
+
 const WEB_URL = process.env.WEB_URL || `http://localhost:${PORT}`;
 
 const STATS_MEMBERS_ID = '1540564623286214717'; 
@@ -135,7 +139,6 @@ app.get('/verify', (req, res) => {
         `);
     }
 
-    // Universelles Captcha (Zahlen und einfache Mathe-Syntax, weltweit verständlich)
     const num1 = Math.floor(Math.random() * 8) + 2;
     const num2 = Math.floor(Math.random() * 8) + 2;
     const captchaAnswer = num1 + num2;
@@ -278,18 +281,22 @@ app.post('/complete', async (req, res) => {
             await member.roles.add(role);
             saveVerifiedUser(userId);
 
-            if (LOG_CHANNEL_ID) {
-                const logChannel = await client.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
-                if (logChannel && logChannel.isTextBased()) {
-                    const logEmbed = new EmbedBuilder()
-                        .setColor(0x3ba55d)
-                        .setTitle('🛡️ New Successful Verification')
-                        .addFields(
-                            { name: 'Member', value: `<@${userId}> (${userId})`, inline: true },
-                            { name: 'IP Address', value: `\`${clientIp}\``, inline: true }
-                        )
-                        .setTimestamp();
-                    await logChannel.send({ embeds: [logEmbed] }).catch(() => {});
+            // --- LOGS AN BEIDE KANÄLE SENDEN ---
+            const logChannels = [LOG_CHANNEL_1, LOG_CHANNEL_2];
+            for (const channelId of logChannels) {
+                if (channelId) {
+                    const logChannel = await client.channels.fetch(channelId).catch(() => null);
+                    if (logChannel && logChannel.isTextBased()) {
+                        const logEmbed = new EmbedBuilder()
+                            .setColor(0x3ba55d)
+                            .setTitle('🛡️ New Successful Verification')
+                            .addFields(
+                                { name: 'Member', value: `<@${userId}> (${userId})`, inline: true },
+                                { name: 'IP Address', value: `\`${clientIp}\``, inline: true }
+                            )
+                            .setTimestamp();
+                        await logChannel.send({ embeds: [logEmbed] }).catch(() => {});
+                    }
                 }
             }
 
