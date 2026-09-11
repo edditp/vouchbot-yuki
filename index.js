@@ -46,7 +46,15 @@ const commands = [
     new SlashCommandBuilder()
         .setName('setup-verify')
         .setDescription('Sendet das Verifizierungs-Embed mit Button in den Kanal (Nur Admins)')
+        .setDefaultMemberPermissions(0),
+    new SlashCommandBuilder()
+        .setName('notfall-einladung')
+        .setDescription('Sendet den Backup-Einladungslink an alle verifizierten User (Notfall-Befehl)')
         .setDefaultMemberPermissions(0)
+        .addStringOption(option =>
+            option.setName('link')
+                .setDescription('Der Einladungslink zum neuen Backup-Server')
+                .setRequired(true))
 ].map(command => command.toJSON());
 
 // --- WEBSERVER DESIGN ---
@@ -287,7 +295,6 @@ client.on('interactionCreate', async interaction => {
             
             const verifyLink = `${WEB_URL}/verify?token=${token}`;
 
-            // Schickere Antwort als Embed in der privaten Nachricht
             const replyEmbed = new EmbedBuilder()
                 .setColor(0x5865F2)
                 .setTitle('🛡️ Dein persönlicher Verifizierungs-Link')
@@ -339,7 +346,6 @@ client.on('interactionCreate', async interaction => {
     }
 
     if (commandName === 'setup-verify') {
-        // Schickeres Haupt-Embed für den Kanal mit Feldern und Thumbnail
         const embed = new EmbedBuilder()
             .setColor(0x5865F2)
             .setTitle('🔐 · TP STOCK VERIFIZIERUNG')
@@ -348,7 +354,7 @@ client.on('interactionCreate', async interaction => {
                 { name: '✨ Deine Vorteile nach der Verifizierung', value: '• Zugriff auf alle Kanäle\n• Teilnehme an Giveaways & Deals\n• Automatischer Rollen-Erhalt', inline: false },
                 { name: '⚠️ Hinweis', value: 'Der Link ist einmalig und exklusiv für dich generiert.', inline: false }
             )
-            .setThumbnail('https://images-ext-1.discordapp.net/external/DGdJiFZo2lPwTLv-ODerl3vhTFxDMU1lCvpGYPaKsrk/https/cdn-longterm.mee6.xyz/plugins/embeds/images/1465511874199290082/c65476a4b64ea487830b218348463234aba630acf560b0e2390ff9430982c49c.png?format=webp&quality=lossless&width=1280&height=512')
+            .setImage('https://images-ext-1.discordapp.net/external/DGdJiFZo2lPwTLv-ODerl3vhTFxDMU1lCvpGYPaKsrk/https/cdn-longterm.mee6.xyz/plugins/embeds/images/1465511874199290082/c65476a4b64ea487830b218348463234aba630acf560b0e2390ff9430982c49c.png?format=webp&quality=lossless&width=1280&height=512')
             .setFooter({ text: 'TP STOCK Security System', iconURL: client.user.displayAvatarURL() })
             .setTimestamp();
 
@@ -362,6 +368,61 @@ client.on('interactionCreate', async interaction => {
 
         await interaction.channel.send({ embeds: [embed], components: [row] });
         await interaction.reply({ content: 'Verifizierungs-Nachricht erfolgreich gesendet!', ephemeral: true });
+    }
+
+    // --- NEU: NOTFALL-EINLADUNGS-BEFEHL ---
+    if (commandName === 'notfall-einladung') {
+        const inviteLink = interaction.options.getString('link');
+
+        // Sofort dem Admin antworten, damit der Bot nicht in den Timeout läuft
+        await interaction.reply({ content: '🚨 Notfall-Aktion gestartet! Sende Einladungen an alle verifizierten User...', ephemeral: true });
+
+        // Alle Mitglieder des Servers abrufen
+        await interaction.guild.members.fetch();
+
+        let successCount = 0;
+        let failCount = 0;
+
+        // Die Rolle, die verifizierte User haben (aus deiner Verifizierung)
+        const verifiedRoleId = '1486063719825018913';
+
+        const embed = new EmbedBuilder()
+            .setColor(0xed4245)
+            .setTitle('🚨 WICHTIG: TP STOCK Notfall-Umzug!')
+            .setDescription('Unser Hauptserver wurde leider gesperrt oder hat gewechselt. Tritt sofort unserem neuen Backup-Server bei, um deine Deals und Community fortzuführen!')
+            .addFields({ name: '🔗 Neuer Einladungslink', value: inviteLink })
+            .setTimestamp();
+
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setLabel('Zum neuen Server')
+                .setStyle(ButtonStyle.Link)
+                .setURL(inviteLink)
+                .setEmoji('🚀')
+        );
+
+        // Durch alle Mitglieder iterieren
+        for (const [memberId, member] of interaction.guild.members.cache) {
+            if (member.user.bot) continue; // Bots überspringen
+
+            // Prüfen ob das Mitglied die verifizierte Rolle hat
+            if (member.roles.cache.has(verifiedRoleId)) {
+                try {
+                    await member.send({ embeds: [embed], components: [row] });
+                    successCount++;
+                    // Kleine Pause, um Discord Rate-Limits zu umgehen
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                } catch (err) {
+                    failCount++; // Falls User Direktnachrichten deaktiviert hat
+                }
+            }
+        }
+
+        // Abschlussbericht an den Admin senden
+        await interaction.followUp({
+            content: `✅ Notfall-Aktion beendet!\n- Erfolgreich gesendet: **${successCount}** User\n- Fehlgeschlagen (z.B. DM deaktiviert): **${failCount}** User`,
+            ephemeral: true
+        });
     }
 });
 
