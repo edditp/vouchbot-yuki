@@ -101,7 +101,6 @@ app.post('/complete', async (req, res) => {
     pendingVerifications.delete(token);
 
     try {
-        // HIER DEINE SERVER-ID UND ROLLE-ID EINTRAGEN:
         const guild = await client.guilds.fetch('1465511874199290082');
         const member = await guild.members.fetch(userId);
         const role = guild.roles.cache.get('1486063719825018913');
@@ -185,7 +184,7 @@ async function sendStickyMessage(channel) {
 }
 
 client.on('interactionCreate', async interaction => {
-    // Buttons verarbeiten
+    // Buttons verarbeiten (direkt anklickbarer Link-Button)
     if (interaction.isButton() && interaction.customId === 'start_verification') {
         const token = uuidv4();
         pendingVerifications.set(token, interaction.user.id);
@@ -193,7 +192,16 @@ client.on('interactionCreate', async interaction => {
         const verifyLink = `${WEB_URL}/verify?token=${token}`;
 
         await interaction.reply({
-            content: `Klicke auf den folgenden Link, um dich zu verifizieren:\n👉 **${verifyLink}**`,
+            content: `Klicke auf den folgenden Button, um dich zu verifizieren:`,
+            components: [
+                new ActionRowBuilder().addComponents(
+                    new ButtonBuilder()
+                        .setLabel('Website öffnen & Verifizieren')
+                        .setStyle(ButtonStyle.Link)
+                        .setURL(verifyLink)
+                        .setEmoji('🌐')
+                )
+            ],
             ephemeral: true // Nur für den User sichtbar
         });
         return;
