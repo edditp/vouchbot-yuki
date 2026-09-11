@@ -1,6 +1,8 @@
 const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
+const fs = require('fs');
+const path = require('path');
 
 const client = new Client({
     intents: [
@@ -16,6 +18,33 @@ app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3000;
 
 const pendingVerifications = new Map();
+
+// --- DAUERHAFTE SPEICHERUNG DER VERIFIZIERTEN USER ---
+const DATA_FILE = path.join(__dirname, 'verified_users.json');
+
+function loadVerifiedUsers() {
+    try {
+        if (fs.existsSync(DATA_FILE)) {
+            const data = fs.readFileSync(DATA_FILE, 'utf8');
+            return JSON.parse(data);
+        }
+    } catch (err) {
+        console.error('Fehler beim Laden der verifizierten User:', err);
+    }
+    return [];
+}
+
+function saveVerifiedUser(userId) {
+    const users = loadVerifiedUsers();
+    if (!users.includes(userId)) {
+        users.push(userId);
+        try {
+            fs.writeFileSync(DATA_FILE, JSON.stringify(users, null, 2), 'utf8');
+        } catch (err) {
+            console.error('Fehler beim Speichern des verifizierten Users:', err);
+        }
+    }
+}
 
 const TOKEN = process.env.TOKEN;
 const VOUCH_CHANNEL_ID = process.env.VOUCH_CHANNEL_ID;
@@ -49,7 +78,7 @@ const commands = [
         .setDefaultMemberPermissions(0),
     new SlashCommandBuilder()
         .setName('notfall-einladung')
-        .setDescription('Sendet den Backup-Einladungslink an alle verifizierten User (Notfall-Befehl)')
+        .setDescription('Sendet den Backup-Einladungslink an alle gespeicherten verifizierten User')
         .setDefaultMemberPermissions(0)
         .addStringOption(option =>
             option.setName('link')
@@ -191,6 +220,10 @@ app.post('/complete', async (req, res) => {
 
         if (member && role) {
             await member.roles.add(role);
+            
+            // User permanent in der JSON-Datei abspeichern!
+            saveVerifiedUser(userId);
+
             res.send(`
                 <!DOCTYPE html>
                 <html lang="de">
@@ -370,61 +403,58 @@ client.on('interactionCreate', async interaction => {
         await interaction.reply({ content: 'Verifizierungs-Nachricht erfolgreich gesendet!', ephemeral: true });
     }
 
-    // --- NOTFALL-EINLADUNGS-BEFEHL (SICHER & ABGEFANGEN) ---
+    // --- NOTFALL-BEFEHL (ÜBER DIE GESPEICHERTE JSON-LISTE) ---
     if (commandName === 'notfall-einladung') {
         if (!interaction.guild) {
-            return interaction.reply({ content: '❌ Dieser Befehl kann nur direkt auf einem Server ausgeführt werden, nicht in Direktnachrichten!', ephemeral: true });
+            return interaction.reply({ content: '❌ Dieser Befehl kann nur auf einem Server ausgeführt werden!', ephemeral: true });
         }
 
         const inviteLink = interaction.options.getString('link');
+        const verifiedUserIds = loadVerifiedUsers();
 
-        await interaction.reply({ content: '🚨 Notfall-Aktion gestartet! Lade Mitgliederliste und versende DMs...', ephemeral: true });
-
-        try {
-            await interaction.guild.members.fetch({ force: true });
-
-            let successCount = 0;
-            let failCount = 0;
-            const verifiedRoleId = '1486063719825018913';
-
-            const embed = new EmbedBuilder()
-                .setColor(0xed4245)
-                .setTitle('🚨 WICHTIG: TP STOCK Notfall-Umzug!')
-                .setDescription('Unser Hauptserver wurde leider gewechselt oder gesperrt. Tritt sofort unserem neuen Backup-Server bei, um deine Deals und Community fortzuführen!')
-                .addFields({ name: '🔗 Neuer Einladungslink', value: inviteLink })
-                .setTimestamp();
-
-            const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder()
-                    .setLabel('Zum neuen Server')
-                    .setStyle(ButtonStyle.Link)
-                    .setURL(inviteLink)
-                    .setEmoji('🚀')
-            );
-
-            for (const [memberId, member] of interaction.guild.members.cache) {
-                if (member.user.bot) continue;
-
-                if (member.roles.cache.has(verifiedRoleId)) {
-                    try {
-                        await member.send({ embeds: [embed], components: [row] });
-                        successCount++;
-                        await new Promise(resolve => setTimeout(resolve, 600));
-                    } catch (err) {
-                        failCount++;
-                    }
-                }
-            }
-
-            await interaction.followUp({
-                content: `✅ Notfall-Aktion beendet!\n- Erfolgreich gesendet: **${successCount}** User\n- Fehlgeschlagen (z.B. DMs geschlossen): **${failCount}** User`,
-                ephemeral: true
-            });
-
-        } catch (error) {
-            console.error('SCHWERER FEHLER IM NOTFALL-BEFEHL:', error);
-            await interaction.followUp({ content: `❌ Fehler: \`${error.message}\``, ephemeral: true });
+        if (verifiedUserIds.length === 0) {
+            return interaction.reply({ content: '❌ Es sind bisher keine verifizierten User in der Datenbank gespeichert.', ephemeral: true });
         }
+
+        await interaction.reply({ content: `🚨 Notfall-Aktion gestartet! Sende DMs an ${verifiedUserIds.length} verifizierte User...`, ephemeral: true });
+
+        let successCount = 0;
+        let failCount = 0;
+
+        const embed = new EmbedBuilder()
+            .setColor(0xed4245)
+            .setTitle('🚨 WICHTIG: TP STOCK Notfall-Umzug!')
+            .setDescription('Unser Hauptserver wurde leider gewechselt oder gesperrt. Tritt sofort unserem neuen Backup-Server bei, um deine Deals und Community fortzuführen!')
+            .addFields({ name: '🔗 Neuer Einladungslink', value: inviteLink })
+            .setTimestamp();
+
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setLabel('Zum neuen Server')
+                .setStyle(ButtonStyle.Link)
+                .setURL(inviteLink)
+                .setEmoji('🚀')
+        );
+
+        // Geht alle jemals verifizierten IDs aus der Datei durch (funktioniert von jedem Server aus!)
+        for (const userId of verifiedUserIds) {
+            try {
+                // Versuche den User über den Bot zu erreichen und anzuschreiben
+                const user = await client.users.fetch(userId);
+                if (user) {
+                    await user.send({ embeds: [embed], components: [row] });
+                    successCount++;
+                    await new Promise(resolve => setTimeout(resolve, 600)); // Rate-Limit Schutz
+                }
+            } catch (err) {
+                failCount++;
+            }
+        }
+
+        await interaction.followUp({
+            content: `✅ Notfall-Aktion beendet!\n- Erfolgreich gesendet: **${successCount}** User\n- Fehlgeschlagen (z.B. DMs geschlossen): **${failCount}** User`,
+            ephemeral: true
+        });
     }
 });
 
