@@ -370,8 +370,12 @@ client.on('interactionCreate', async interaction => {
         await interaction.reply({ content: 'Verifizierungs-Nachricht erfolgreich gesendet!', ephemeral: true });
     }
 
-    // --- NOTFALL-EINLADUNGS-BEFEHL MIT DETAILLIERTEM LOG ---
+    // --- NOTFALL-EINLADUNGS-BEFEHL (SICHER & ABGEFANGEN) ---
     if (commandName === 'notfall-einladung') {
+        if (!interaction.guild) {
+            return interaction.reply({ content: '❌ Dieser Befehl kann nur direkt auf einem Server ausgeführt werden, nicht in Direktnachrichten!', ephemeral: true });
+        }
+
         const inviteLink = interaction.options.getString('link');
 
         await interaction.reply({ content: '🚨 Notfall-Aktion gestartet! Lade Mitgliederliste und versende DMs...', ephemeral: true });
@@ -419,7 +423,6 @@ client.on('interactionCreate', async interaction => {
 
         } catch (error) {
             console.error('SCHWERER FEHLER IM NOTFALL-BEFEHL:', error);
-            // Gibt den echten technischen Fehler im Discord-Chat aus, damit wir sehen, was klemmt
             await interaction.followUp({ content: `❌ Fehler: \`${error.message}\``, ephemeral: true });
         }
     }
